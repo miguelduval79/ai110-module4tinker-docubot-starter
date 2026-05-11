@@ -145,3 +145,28 @@ Write 2 to 4 short bullet points.
 - _Guideline 3 (optional)_
 
 ---
+## RAG Evaluation and Observations
+
+I tested DocuBot using all three modes: Naive LLM, Retrieval Only, and RAG.
+
+### Naive LLM Mode
+The Naive LLM mode attempted to answer questions without retrieval grounding. This approach can sound confident even when the answer is not fully supported by the documentation. During testing, the Gemini API quota prevented complete evaluation, but the architecture showed how a model can attempt to answer using only its general reasoning abilities.
+
+### Retrieval Only Mode
+The Retrieval Only mode produced the most reliable evidence-based results. It successfully returned focused snippets from AUTH.md for the question:
+
+> "Where is the auth token generated?"
+
+The system also correctly refused unrelated questions such as:
+
+> "What is the refund policy?"
+
+This mode demonstrated strong grounding and low hallucination risk, but the responses were less natural because they only returned raw snippets.
+
+### RAG Mode
+RAG mode combined retrieval with generation. The retrieval pipeline worked correctly and passed relevant snippets into the LLM layer. However, Gemini API quota limitations prevented full response generation during testing.
+
+Even without full generation, the architecture demonstrated how RAG systems improve reliability by forcing the model to use retrieved evidence instead of relying only on model memory.
+
+### Key Learning
+One important lesson from this project is that retrieval quality matters more than simply using a powerful model. Better snippet selection, stop-word filtering, and guardrails significantly improved reliability and reduced incorrect answers.

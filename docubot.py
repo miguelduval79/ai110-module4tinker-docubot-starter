@@ -1,14 +1,16 @@
 """
 Core DocuBot class responsible for:
 - Loading documents from the docs/ folder
-- Building a simple retrieval index (Phase 1)
-- Retrieving relevant snippets (Phase 1)
+- Building a simple retrieval index
+- Retrieving relevant snippets
 - Supporting retrieval only answers
-- Supporting RAG answers when paired with Gemini (Phase 2)
+- Supporting RAG answers when paired with Gemini
 """
 
 import os
 import glob
+import string
+
 
 class DocuBot:
     def __init__(self, docs_folder="docs", llm_client=None):
@@ -19,10 +21,7 @@ class DocuBot:
         self.docs_folder = docs_folder
         self.llm_client = llm_client
 
-        # Load documents into memory
-        self.documents = self.load_documents()  # List of (filename, text)
-
-        # Build a retrieval index (implemented in Phase 1)
+        self.documents = self.load_documents()
         self.index = self.build_index(self.documents)
 
     # -----------------------------------------------------------
@@ -36,64 +35,130 @@ class DocuBot:
         """
         docs = []
         pattern = os.path.join(self.docs_folder, "*.*")
+
         for path in glob.glob(pattern):
             if path.endswith(".md") or path.endswith(".txt"):
                 with open(path, "r", encoding="utf8") as f:
                     text = f.read()
+
                 filename = os.path.basename(path)
                 docs.append((filename, text))
+
         return docs
 
     # -----------------------------------------------------------
-    # Index Construction (Phase 1)
+    # Text Cleaning Helper
+    # -----------------------------------------------------------
+
+    def tokenize(self, text):
+        """
+        Convert text into lowercase words with punctuation removed.
+        """
+        text = text.lower()
+
+        for mark in string.punctuation:
+            text = text.replace(mark, " ")
+
+        stop_words = {
+            "what", "where", "which", "how", "do", "does", "is", "are",
+            "the", "a", "an", "to", "of", "in", "on", "for", "and",
+            "or", "this", "that", "with", "from"
+        }
+
+        words = text.split()
+
+        return [
+            word
+            for word in words
+            if word not in stop_words
+        ]
+
+    def split_into_snippets(self, text):
+        """
+        Split a document into smaller paragraph-sized snippets.
+        """
+        raw_sections = text.split("\n\n")
+        snippets = []
+
+        for section in raw_sections:
+            cleaned = section.strip()
+
+            if cleaned:
+                snippets.append(cleaned)
+
+        return snippets
+
+    # -----------------------------------------------------------
+    # Index Construction
     # -----------------------------------------------------------
 
     def build_index(self, documents):
         """
-        TODO (Phase 1):
-        Build a tiny inverted index mapping lowercase words to the documents
-        they appear in.
-
-        Example structure:
-        {
-            "token": ["AUTH.md", "API_REFERENCE.md"],
-            "database": ["DATABASE.md"]
-        }
-
-        Keep this simple: split on whitespace, lowercase tokens,
-        ignore punctuation if needed.
+        Build a tiny inverted index mapping words to document filenames.
         """
         index = {}
-        # TODO: implement simple indexing
+
+        for filename, text in documents:
+            words = self.tokenize(text)
+
+            for word in words:
+                if word not in index:
+                    index[word] = set()
+
+                index[word].add(filename)
+
         return index
 
     # -----------------------------------------------------------
-    # Scoring and Retrieval (Phase 1)
+    # Scoring and Retrieval
     # -----------------------------------------------------------
 
     def score_document(self, query, text):
         """
-        TODO (Phase 1):
-        Return a simple relevance score for how well the text matches the query.
-
-        Suggested baseline:
-        - Convert query into lowercase words
-        - Count how many appear in the text
-        - Return the count as the score
+        Return a relevance score based on matching query words.
         """
-        # TODO: implement scoring
-        return 0
+        query_words = self.tokenize(query)
+        document_words = self.tokenize(text)
+
+        score = 0
+
+        for word in query_words:
+            score += document_words.count(word)
+
+        return score
 
     def retrieve(self, query, top_k=3):
         """
-        TODO (Phase 1):
-        Use the index and scoring function to select top_k relevant document snippets.
-
-        Return a list of (filename, text) sorted by score descending.
+        Return the top_k most relevant snippets for a query.
         """
+        scored_results = []
+
+        for filename, text in self.documents:
+            snippets = self.split_into_snippets(text)
+
+            for snippet in snippets:
+                score = self.score_document(query, snippet)
+
+                if score > 0:
+                    scored_results.append((score, filename, snippet))
+
+        scored_results.sort(reverse=True, key=lambda item: item[0])
+
+        if not scored_results:
+            return []
+
+        best_score = scored_results[0][0]
+
+        # Guardrail: refuse weak matches
+        if best_score < 3:
+            return []
+
         results = []
-        # TODO: implement retrieval logic
-        return results[:top_k]
+
+        for score, filename, snippet in scored_results[:top_k]:
+            results.append((filename, snippet))
+
+        return results
 
     # -----------------------------------------------------------
     # Answering Modes
@@ -101,8 +166,7 @@ class DocuBot:
 
     def answer_retrieval_only(self, query, top_k=3):
         """
-        Phase 1 retrieval only mode.
-        Returns raw snippets and filenames with no LLM involved.
+        Return raw snippets and filenames with no LLM involved.
         """
         snippets = self.retrieve(query, top_k=top_k)
 
@@ -110,6 +174,7 @@ class DocuBot:
             return "I do not know based on these docs."
 
         formatted = []
+
         for filename, text in snippets:
             formatted.append(f"[{filename}]\n{text}\n")
 
@@ -117,9 +182,7 @@ class DocuBot:
 
     def answer_rag(self, query, top_k=3):
         """
-        Phase 2 RAG mode.
-        Uses student retrieval to select snippets, then asks Gemini
-        to generate an answer using only those snippets.
+        Use retrieval to select snippets, then ask the LLM to answer using only those snippets.
         """
         if self.llm_client is None:
             raise RuntimeError(
@@ -140,6 +203,5 @@ class DocuBot:
     def full_corpus_text(self):
         """
         Returns all documents concatenated into a single string.
-        This is used in Phase 0 for naive 'generation only' baselines.
         """
         return "\n\n".join(text for _, text in self.documents)
